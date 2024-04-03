@@ -1,29 +1,35 @@
-from typing import Callable, Dict, List, Union
+from typing import Callable, List, TypeVar
 
-from .util import get_char, clear, pause
+from .util import clear, pause
+from .prompt import Prompt, InputType
+import string
 
-Label = str
 OptionCallback = Callable[[], None]
+""" a function that takes no arguments and return nothing """
 
-NUMBERS = [str(i) for i in range(1, 10)]
-LETTERS = [chr(i) for i in range(ord('a'), ord('z')+1)]
-OPTION_KEYS = NUMBERS + LETTERS
-EXIT_KEY = '0'
+Char = TypeVar('Char', bound=str)
+""" a single character """
 
-H_BAR = '-' * 20
+KEYS = string.digits + string.ascii_letters
 
-class Menu:
+
+class Menu(Prompt):
 
     def __init__(
-        self, 
-        options: Union[List[OptionCallback], Dict[Label, OptionCallback]], 
-        exit_label: Label = None,
+        self,
+        options: List[OptionCallback],
+        labels: List[str] = None,
+        keys: List[Char] = None,
         title: str = None,
         prompt: str = None,
-        indent: str = None
+        exit_key: str = None,
+        exit_label: str = None,
+        indent: str = None,
+        h_bar: str = None,
+        use_docstring: bool = None,
     ) -> None:
         """
-        CLI menu with options that can be triggered by a keyboard key-press  
+        A CLI menu with options that are callbed based on user key-press  
 
         Each option has 3 components:
         - key: 
@@ -31,83 +37,96 @@ class Menu:
         - label: 
             string label of the option
         - callback: 
-            function that gets called. it should take no args and return None
+            function that gets called for the corresponding key
             (no args and return value are passed back-n-forth)
-
         """
-        self.set_options(options, exit_label, indent)
-        self.title = title or 'Menu'
-        self.prompt = prompt or f'Enter an option {self.keys_str}: '
 
-    def set_options(
-        self, 
-        options: Union[List[OptionCallback], Dict[Label, OptionCallback]],
+        self.input_type = InputType.single_key
+        self.setup(options, labels, keys, title, prompt, exit_key,
+                   exit_label, indent, h_bar, use_docstring)
+
+    def setup(
+        self,
+        options: List[OptionCallback],
+        labels: List[str] = None,
+        keys: List[Char] = None,
+        title: str = None,
+        prompt: str = None,
+        exit_key: str = None,
         exit_label: str = None,
         indent: str = None,
+        h_bar: str = None,
+        use_docstring: bool = None,
     ):
-        if len(options) > len(OPTION_KEYS):
-            raise ValueError(f'Cannot have more than {len(OPTION_KEYS)} options: {options}')
 
-        if isinstance(options, list):
-            labels = [func.__name__ for func in options]
-            funcs = options
+        if len(options) > (len(KEYS)-1):
+            raise ValueError(
+                f'Cannot have more than {(len(KEYS)-1)} options: {options}')
 
-        elif isinstance(options, dict):
-            labels = list(options.keys())
-            funcs = list(options.values())
-
-        else:
-            raise NotImplementedError(f'Unexpected type: {type(options)}')
-        
-        labels = {key: label for key, label in zip(OPTION_KEYS, labels)}
-        funcs = {key: func for key, func in zip(OPTION_KEYS, funcs)}
-
-        labels[EXIT_KEY] = exit_label or 'Exit'
-        funcs[EXIT_KEY] = self.exit
-
+        title = title or "Menu"
+        prompt = prompt or 'Enter an option: '
+        exit_key = exit_key or '0'
+        exit_label = exit_label or 'Exit'
         indent = indent or '  '
+        h_bar = h_bar or '--------------------'
+        use_docstring = use_docstring if use_docstring is not None else True
 
-        str_labels = '\n'.join(
-            f'{indent}<{key}> {label}' 
-            for key, label in labels.items()
-        )
-        str_keys = f'({', '.join(labels)})'
+        keys = keys or [key for key in KEYS if key != exit_key][:len(options)]
+        labels = labels or [func.__name__ for func in options]
 
-        self.labels = labels
-        self.funcs = funcs
-        self.labels_str = str_labels
-        self.keys_str = str_keys
+        for key in [*keys, exit_key]:
+            if key not in KEYS:
+                raise ValueError(f'Unexpected key: {key}')
 
-    def print(self):
-        msg = [
-            self.title,
-            H_BAR,
-            self.labels_str,
-            H_BAR,
-            self.prompt,
+        keys.append(exit_key)
+        labels.append(exit_label)
+
+        d_options = dict(zip(keys, options))
+
+        msg_lines = [
+            f'{indent}{key} {label}'
+            for key, label in zip(keys, labels)
         ]
-        msg = [i for i in msg if i is not None]
-        msg = '\n'.join(msg)
-        print(msg, end='', flush=True)
 
-    def dispatch(self, key: str):
-        print(key)
-        d = self.funcs
-        f = d.get(key, self.default)
-        f()
+        if use_docstring:
+            for i, option in enumerate(options):
+                if option.__doc__:
+                    msg_lines[i] += f'\n{indent*2}{option.__doc__}'
 
-    def default(self):
-        """ Default callback for undefined key """
-        print(f'Unexpected option key. Expecting: {self.keys_str}')
-        pause()
+        msg = '\n'.join([
+            title,
+            h_bar,
+            *msg_lines,
+            h_bar,
+            prompt,
+        ])
 
-    def exit(self):
-        self._loop = False
+        self.options = options
+        self.labels = labels
+        self.keys = keys
+        self.title = title
+        self.prompt = prompt
+        self.indent = indent
+        self.exit_key = exit_key
+        self.exit_label = exit_label
+        self.h_bar = h_bar
+        self.use_docstring = use_docstring
 
-    def loop(self):
-        self._loop = True
-        while self._loop:
-            clear()
-            self.print()
-            key = get_char()
-            self.dispatch(key)
+        self.d_options = d_options
+        self.msg = msg
+
+    def print_message(self):
+        clear()
+        return super().print_message()
+
+    def callback(self, command: str) -> str:
+        key = command
+        if key == self.exit_key:
+            self._exit = True
+        elif key in self.d_options:
+            self.d_options[key]()
+        else:
+            print(f'Unexpected key: {key}. Expecting: {", ".join(self.keys)}')
+            pause()
+        return command
+
