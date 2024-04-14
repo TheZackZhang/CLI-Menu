@@ -1,13 +1,13 @@
-from typing import Callable, List, TypeVar
-
-from .util import clear, pause
-from .prompt import Prompt, InputType
 import string
+from typing import Callable, List
+
+from .prompt import InputType, Prompt
+from .util import clear, pause
 
 OptionCallback = Callable[[], None]
 """ a function that takes no arguments and return nothing """
 
-Char = TypeVar('Char', bound=str)
+Char = str
 """ a single character """
 
 KEYS = string.digits + string.ascii_letters
@@ -129,4 +129,3 @@ class Menu(Prompt):
             print(f'Unexpected key: {key}. Expecting: {", ".join(self.keys)}')
             pause()
         return command
-
